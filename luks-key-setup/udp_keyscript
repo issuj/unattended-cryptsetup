@@ -1,0 +1,30 @@
+#!/bin/sh
+# udp_keyscript – used by cryptsetup during initramfs unlock
+# It contacts a UDP server, receives a token, mixes it with a static secret,
+# hashes the combination with SHA‑256 and outputs the raw 32‑byte key.
+
+# ----- configuration (filled in by the interactive setup script) -----
+SERVER_IP="{{SERVER_IP}}"
+SERVER_PORT="{{SERVER_PORT}}"
+TRIGGER="{{TRIGGER}}"
+STATIC_KEY_FILE="/etc/initramfs-tools/conf.d/static_key"
+
+# ----- fetch token ---------------------------------------------------
+TOKEN=$(/usr/bin/udp-client "$SERVER_IP" "$SERVER_PORT" "$TRIGGER" 3 2000)
+if [ $? -ne 0 ] || [ -z "$TOKEN" ]; then
+    echo "Failed to obtain token from $SERVER_IP:$SERVER_PORT" >&2
+    exit 1
+fi
+
+# ----- read static secret -------------------------------------------
+if [ ! -r "$STATIC_KEY_FILE" ]; then
+    echo "Static key file missing: $STATIC_KEY_FILE" >&2
+    exit 1
+fi
+STATIC_KEY=$(cat "$STATIC_KEY_FILE")
+
+# ----- derive final key ---------------------------------------------
+# Concatenate and hash (binary output)
+printf "%s%s" "$STATIC_KEY" "$TOKEN" | sha256sum -b | awk '{print $1}' | xxd -r -p
+
+exit 0

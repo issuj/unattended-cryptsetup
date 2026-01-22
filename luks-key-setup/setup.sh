@@ -17,7 +17,7 @@ read -p "Volume device to unlock (e.g., /dev/sda3) [optional, for your notes]: "
 
 # ---------- 2. Write static secret into initramfs config ----------
 echo "Writing static secret to /etc/initramfs-tools/conf.d/static_key (requires sudo)..."
-printf "%s\n" "$STATIC_SECRET" | sudo tee /etc/initramfs-tools/conf.d/static_key > /dev/null
+printf "STATIC_KEY=%s\n" "$STATIC_SECRET" | sudo tee /etc/initramfs-tools/conf.d/static_key > /dev/null
 sudo chmod 600 /etc/initramfs-tools/conf.d/static_key
 
 # ---------- 3. Generate the keyscript with the supplied values ----------
@@ -42,7 +42,7 @@ if [ ! -r "$STATIC_KEY_FILE" ]; then
     echo "Static key file missing: $STATIC_KEY_FILE" >&2
     exit 1
 fi
-STATIC_KEY=$(cat "$STATIC_KEY_FILE")
+. "$STATIC_KEY_FILE"
 
 # Derive final key (SHA‑256 of static+token, binary output)
 printf "%s%s" "$STATIC_KEY" "$TOKEN" | sha256sum -b | awk '{print $1}' | xxd -r -p
@@ -67,7 +67,7 @@ cd "$(dirname "$0")/.."
 
 # ---------- 5. Install binary and initramfs hook ----------
 # Install binary where the hook expects it (the hook copies it from the repo directory)
-sudo install -m 0755 ./luks-key-setup/udp-client.musl /usr/local/sbin/udp-client
+sudo install -m 0755 ./client/udp-client.musl /usr/local/sbin/udp-client
 
 # Install the initramfs hook (will copy binary & keyscript into the initramfs image)
 sudo install -m 0755 ./luks-key-setup/udp_client_hook /etc/initramfs-tools/hooks/udp-client
@@ -77,7 +77,7 @@ echo "Updating initramfs..."
 sudo update-initramfs -u -k $(uname -r)
 
 # ---------- 7. Final notes ----------
-echo "\nSetup complete.\n"
+echo -e "\nSetup complete.\n"
 if [[ -n "$VOLUME" ]]; then
     echo "Remember to add the following line to /etc/crypttab (replace UUID as needed):"
     echo "cryptroot UUID=$(blkid -s UUID -o value $VOLUME) none luks,keyscript=/usr/lib/cryptsetup/scripts/udp_keyscript"

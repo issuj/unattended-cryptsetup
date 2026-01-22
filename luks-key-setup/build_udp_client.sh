@@ -15,7 +15,7 @@ else
 fi
 
 # Output binary name (musl static)
-OUT="udp-client.musl"
+OUT="client/udp-client.musl"
 
 # Compile with musl-gcc (static linking)
 if command -v musl-gcc >/dev/null 2>&1; then

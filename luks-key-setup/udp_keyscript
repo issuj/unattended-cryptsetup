@@ -1,30 +1,43 @@
 #!/bin/sh
-# udp_keyscript – used by cryptsetup during initramfs unlock
+# udp_keyscript – tries UDP token, falls back to password prompt.
 # It contacts a UDP server, receives a token, mixes it with a static secret,
 # hashes the combination with SHA‑256 and outputs the raw 32‑byte key.
+# If the UDP step fails, it prompts for a password (different keyslot) and
+# outputs that password unchanged.
 
-# ----- configuration (filled in by the interactive setup script) -----
+# ----- configuration (filled by setup) -----
 SERVER_IP="{{SERVER_IP}}"
 SERVER_PORT="{{SERVER_PORT}}"
 TRIGGER="{{TRIGGER}}"
-STATIC_KEY_FILE="/etc/initramfs-tools/conf.d/static_key"
+STATIC_KEY_FILE="/conf/conf.d/static_key"
+UDP_CLIENT="/usr/bin/udp-client"
+RETRIES=3   # seconds for udp-client (the client already accepts timeout args)
 
-# ----- fetch token ---------------------------------------------------
-TOKEN=$(/usr/bin/udp-client "$SERVER_IP" "$SERVER_PORT" "$TRIGGER" 3 2000)
-if [ $? -ne 0 ] || [ -z "$TOKEN" ]; then
-    echo "Failed to obtain token from $SERVER_IP:$SERVER_PORT" >&2
-    exit 1
+# ----- function to read static secret -----
+read_static_key() {
+    if [ -r "$STATIC_KEY_FILE" ]; then
+        cat "$STATIC_KEY_FILE"
+    else
+        echo "Static key file missing: $STATIC_KEY_FILE" >&2
+        return 1
+    fi
+}
+
+# ----- try UDP method -----
+TOKEN=$($UDP_CLIENT "$SERVER_IP" "$SERVER_PORT" "$TRIGGER" "$TIMEOUT" 1000 2>/dev/null)
+if [ $? -eq 0 ] && [ -n "$TOKEN" ]; then
+    # Read the static secret; abort if it cannot be read
+    STATIC_KEY=$(read_static_key) || exit 1
+    # Derive the key: SHA‑256 of (static_secret || token) → raw binary
+    printf "%s%s" "$STATIC_KEY" "$TOKEN" | sha256sum -b | awk '{print $1}' | xxd -r -p
+    exit 0
 fi
 
-# ----- read static secret -------------------------------------------
-if [ ! -r "$STATIC_KEY_FILE" ]; then
-    echo "Static key file missing: $STATIC_KEY_FILE" >&2
-    exit 1
-fi
-STATIC_KEY=$(cat "$STATIC_KEY_FILE")
-
-# ----- derive final key ---------------------------------------------
-# Concatenate and hash (binary output)
-printf "%s%s" "$STATIC_KEY" "$TOKEN" | sha256sum -b | awk '{print $1}' | xxd -r -p
-
+# ----- fallback: ask for password -----
+printf "LUKS password (fallback): " >/dev/tty
+stty -echo </dev/tty
+IFS= read -r password </dev/tty
+stty echo </dev/tty
+printf "\n" >/dev/tty
+printf "%s" "$password"
 exit 0

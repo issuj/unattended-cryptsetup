@@ -25,4 +25,14 @@ else
     exit 1
 fi
 
+# Copy static secret into initramfs at /conf/conf.d/static_key
+if [ -f "/etc/initramfs-tools/conf.d/static_key" ]; then
+    . /etc/initramfs-tools/conf.d/static_key
+    mkdir -p "${DESTDIR}/conf"
+    printf "%s" "$STATIC_KEY" > "${DESTDIR}/conf/static_key"
+    chmod 600 "${DESTDIR}/conf/static_key"
+else
+    echo "/etc/initramfs-tools/conf.d/static_key not found – static key will be missing" >&2
+fi
+
 exit 0

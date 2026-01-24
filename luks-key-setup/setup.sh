@@ -20,42 +20,12 @@ echo "Writing static secret to /etc/initramfs-tools/conf.d/static_key (requires 
 printf "STATIC_KEY=%s\n" "$STATIC_SECRET" | sudo tee /etc/initramfs-tools/conf.d/static_key > /dev/null
 sudo chmod 600 /etc/initramfs-tools/conf.d/static_key
 
-# ---------- 3. Generate the keyscript with the supplied values ----------
+# ---------- 3. Install the keyscript with the supplied values ----------
 KEYSCRIPT_TMP=$(mktemp)
-cat <<'EOS' > "$KEYSCRIPT_TMP"
-#!/bin/sh
-# Auto‑generated udp_keyscript for cryptsetup
-SERVER_IP="{{SERVER_IP}}"
-SERVER_PORT="{{SERVER_PORT}}"
-TRIGGER="{{TRIGGER}}"
-STATIC_KEY_FILE="/etc/initramfs-tools/conf.d/static_key"
-
-# Fetch token from UDP server
-TOKEN=$(/usr/bin/udp-client "$SERVER_IP" "$SERVER_PORT" "$TRIGGER" 3 2000)
-if [ $? -ne 0 ] || [ -z "$TOKEN" ]; then
-    echo "Failed to obtain token from $SERVER_IP:$SERVER_PORT" >&2
-    exit 1
-fi
-
-# Read static secret
-if [ ! -r "$STATIC_KEY_FILE" ]; then
-    echo "Static key file missing: $STATIC_KEY_FILE" >&2
-    exit 1
-fi
-. "$STATIC_KEY_FILE"
-
-# Derive final key (SHA‑256 of static+token, binary output)
-printf "%s%s" "$STATIC_KEY" "$TOKEN" | sha256sum -b | awk '{print $1}' | xxd -r -p
-
-exit 0
-EOS
-
-# Replace placeholders
+cp "$(dirname "$0")/udp_keyscript" "$KEYSCRIPT_TMP"
 sed -i "s|{{SERVER_IP}}|$SERVER_IP|g" "$KEYSCRIPT_TMP"
 sed -i "s|{{SERVER_PORT}}|$SERVER_PORT|g" "$KEYSCRIPT_TMP"
 sed -i "s|{{TRIGGER}}|$TRIGGER|g" "$KEYSCRIPT_TMP"
-
-# Install the keyscript to the location cryptsetup expects (will be copied into initramfs by the hook)
 sudo install -m 0755 "$KEYSCRIPT_TMP" /usr/lib/cryptsetup/scripts/udp_keyscript
 rm "$KEYSCRIPT_TMP"
 

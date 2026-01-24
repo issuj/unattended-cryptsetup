@@ -20,7 +20,7 @@ OUT="client/udp-client.musl"
 # Compile with musl-gcc (static linking)
 if command -v musl-gcc >/dev/null 2>&1; then
     echo "Compiling $SRC with musl-gcc..."
-    musl-gcc -static -Wall -Wextra -Os -s "$SRC" -o "$OUT"
+    musl-gcc -static -Wall -Wextra -Os -s "$SRC" client/sha-256.c -o "$OUT"
     echo "Built $OUT"
 else
     echo "musl-gcc not found. Please install musl-tools package." >&2

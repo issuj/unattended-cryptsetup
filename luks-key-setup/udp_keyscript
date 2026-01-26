@@ -8,25 +8,23 @@
 # ----- configuration (filled by setup) -----
 SERVER_IP="{{SERVER_IP}}"
 SERVER_PORT="{{SERVER_PORT}}"
-TRIGGER="{{TRIGGER}}"
-STATIC_KEY_FILE="/conf/static_key"
-UDP_CLIENT="/usr/bin/udp-client"
-RETRIES=3   # seconds for udp-client (the client already accepts timeout args)
+STATIC_KEY_FILE="/conf/unattended-cryptsetup-keys"
+RETRIES=3 # Number of attempts to try the UDP request
+TIMEOUT=3 # netcat timeout per try
 
-# ----- function to read static secret -----
-read_static_key() {
-    if [ -r "$STATIC_KEY_FILE" ]; then
-        cat "$STATIC_KEY_FILE"
-    else
-        echo "Static key file missing: $STATIC_KEY_FILE" >&2
-        return 1
+# Load secret
+. "$STATIC_KEY_FILE"
+
+# ----- try UDP method with retry logic -----
+attempt=0
+while [ $attempt -lt $RETRIES ]; do
+    if echo -n "$TRIGGER" | nc -u -w "$TIMEOUT" "$SERVER_IP" "$SERVER_PORT" \
+        | { printf "%s" "$STATIC_KEY"; cat; } \
+        | sha256sum | awk '{print $1}' | xxd -r -p; then
+        exit 0
     fi
-}
-
-# ----- try UDP method -----
-if $UDP_CLIENT "$SERVER_IP" "$SERVER_PORT" "$TRIGGER" "$RETRIES" 1000 --hash "$STATIC_KEY_FILE"; then
-    exit 0
-fi
+    attempt=$((attempt + 1))
+    done
 
 # ----- fallback: ask for password -----
 printf "LUKS password (fallback): " >/dev/tty

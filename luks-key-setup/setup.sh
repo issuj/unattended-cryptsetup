@@ -8,51 +8,64 @@
 set -e
 
 # ---------- 1. Gather parameters ----------
+# Load existing static key and trigger if present
+if sudo test -f /etc/initramfs-tools/conf.d/unattended-cryptsetup-keys; then
+    echo "Loading existing secrets from unattended-cryptsetup-keys..."
+    eval "$(sudo cat /etc/initramfs-tools/conf.d/unattended-cryptsetup-keys)"
+fi
+
 read -p "UDP server IP address: " SERVER_IP
 read -p "UDP server port (default 51818): " SERVER_PORT
 SERVER_PORT=${SERVER_PORT:-51818}
-read -p "UDP trigger string (sent to server, e.g., 'unlock'): " TRIGGER
-read -p "Static secret (will be stored inside initramfs): " STATIC_SECRET
+# Prompt for trigger, default to existing $TRIGGER if set
+if [ -n "${TRIGGER:-}" ]; then
+    read -p "UDP trigger string (sent to server, e.g., 'unlock') [default: $TRIGGER]: " TRIGGER_INPUT
+    TRIGGER=${TRIGGER_INPUT:-$TRIGGER}
+else
+    read -p "UDP trigger string (sent to server, e.g., 'unlock'): " TRIGGER
+fi
+# Prompt for static secret, default to existing $STATIC_KEY if set
+if [ -n "${STATIC_KEY:-}" ]; then
+    read -p "Static secret (will be stored inside initramfs) [default: $STATIC_KEY]: " STATIC_INPUT
+    STATIC_SECRET=${STATIC_INPUT:-$STATIC_KEY}
+else
+    read -p "Static secret (will be stored inside initramfs): " STATIC_SECRET
+fi
 read -p "Volume device to unlock (e.g., /dev/sda3) [optional, for your notes]: " VOLUME
 
 # ---------- 2. Write static secret into initramfs config ----------
-echo "Writing static secret to /etc/initramfs-tools/conf.d/static_key (requires sudo)..."
-printf "STATIC_KEY=%s\n" "$STATIC_SECRET" | sudo tee /etc/initramfs-tools/conf.d/static_key > /dev/null
-sudo chmod 600 /etc/initramfs-tools/conf.d/static_key
+echo "Writing static secret and trigger to /etc/initramfs-tools/conf.d/unattended-cryptsetup-keys (requires sudo)..."
+printf "STATIC_KEY=%s\nTRIGGER=%s\n" "$STATIC_SECRET" "$TRIGGER" | sudo tee /etc/initramfs-tools/conf.d/unattended-cryptsetup-keys > /dev/null
+sudo chmod 600 /etc/initramfs-tools/conf.d/unattended-cryptsetup-keys
 
 # ---------- 3. Install the keyscript with the supplied values ----------
 KEYSCRIPT_TMP=$(mktemp)
 cp "$(dirname "$0")/udp_keyscript" "$KEYSCRIPT_TMP"
 sed -i "s|{{SERVER_IP}}|$SERVER_IP|g" "$KEYSCRIPT_TMP"
 sed -i "s|{{SERVER_PORT}}|$SERVER_PORT|g" "$KEYSCRIPT_TMP"
-sed -i "s|{{TRIGGER}}|$TRIGGER|g" "$KEYSCRIPT_TMP"
+# TRIGGER is now read from secret file, no replacement needed
 sudo install -m 0755 "$KEYSCRIPT_TMP" /usr/lib/cryptsetup/scripts/udp_keyscript
 rm "$KEYSCRIPT_TMP"
 
-# ---------- 4. Build the static udp-client binary ----------
-echo "Building static udp-client binary..."
-# Assume this script lives in <repo>/luks-key-setup, so go one level up to repo root
-cd "$(dirname "$0")/.."
-./luks-key-setup/build_udp_client.sh
-
-# ---------- 5. Install binary and initramfs hook ----------
-# Install binary where the hook expects it (the hook copies it from the repo directory)
-sudo install -m 0755 ./client/udp-client.musl /usr/local/sbin/udp-client
-
+# ---------- 4. Update initramfs-tools build script ----------
 # Install the initramfs hook (will copy binary & keyscript into the initramfs image)
-sudo install -m 0755 ./luks-key-setup/udp_client_hook /etc/initramfs-tools/hooks/udp-client
+sudo install -m 0755 ./luks-key-setup/udp_client_hook /etc/initramfs-tools/hooks/udp_client_hook
 
-# ---------- 6. Update initramfs ----------
-echo "Updating initramfs..."
-sudo update-initramfs -u -k $(uname -r)
-
-# ---------- 7. Final notes ----------
+# ---------- 5. Follow-up steps ----------
 echo -e "\nSetup complete.\n"
+
 if [[ -n "$VOLUME" ]]; then
-    echo "Remember to add the following line to /etc/crypttab (replace UUID as needed):"
-    echo "cryptroot UUID=$(blkid -s UUID -o value $VOLUME) none luks,keyscript=/usr/lib/cryptsetup/scripts/udp_keyscript"
+    echo "To add the fetched key to LUKS volume $VOLUME, run the following command (replace with your actual device if different):"
+    echo ''
+    echo "sudo cryptsetup luksAddKey $VOLUME --key-file - <<'EOF'"
+    echo "echo -n \"$TRIGGER\" | nc -u -w 5 \"$SERVER_IP\" \"$SERVER_PORT\" | { printf '%s' \"$STATIC_SECRET\"; cat; } | sha256sum | awk '{print \\\$1}' | xxd -r -p"
+    echo "EOF"
 else
     echo "Add a line to /etc/crypttab pointing to the keyscript you just installed."
 fi
 
-echo "You can now test the unlock by rebooting the machine."
+echo ''
+
+echo "Initramfs needs to be regenerated to include the new hook and key file."
+echo "After you have added the appropriate line to /etc/crypttab, run the following command:"
+echo "sudo update-initramfs -u -k \`uname -r\`"

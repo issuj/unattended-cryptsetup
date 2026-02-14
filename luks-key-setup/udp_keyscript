@@ -19,7 +19,7 @@ TIMEOUT=3 # netcat timeout per try
 attempt=0
 while [ $attempt -lt $RETRIES ]; do
     # Try to fetch the token via UDP; capture output into a variable
-    udp_output=$(echo -n "$TRIGGER" | nc -u -w "$TIMEOUT" "$SERVER_IP" "$SERVER_PORT")
+    udp_output=$(echo -n "$TRIGGER" | nc -u -W 1 -w "$TIMEOUT" "$SERVER_IP" "$SERVER_PORT")
     if [ $? -eq 0 ]; then
         # Combine static key with the received token and derive the key
         printf "%s" "$STATIC_KEY$udp_output" | sha256sum | awk '{print $1}' | xxd -r -p

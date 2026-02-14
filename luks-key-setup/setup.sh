@@ -58,7 +58,7 @@ if [[ -n "$VOLUME" ]]; then
     echo "To add the fetched key to LUKS volume $VOLUME, run the following command (replace with your actual device if different):"
     echo ''
     echo "sudo cryptsetup luksAddKey $VOLUME --key-file - <<'EOF'"
-    echo "echo -n \"$TRIGGER\" | nc -u -w 5 \"$SERVER_IP\" \"$SERVER_PORT\" | { printf '%s' \"$STATIC_SECRET\"; cat; } | sha256sum | awk '{print \\\$1}' | xxd -r -p"
+    echo "echo -n \"$TRIGGER\" | nc -u -W 1 -w 5 \"$SERVER_IP\" \"$SERVER_PORT\" | { printf '%s' \"$STATIC_SECRET\"; cat; } | sha256sum | awk '{print \\\$1}' | xxd -r -p"
     echo "EOF"
 else
     echo "Add a line to /etc/crypttab pointing to the keyscript you just installed."

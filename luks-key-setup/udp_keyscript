@@ -18,19 +18,27 @@ TIMEOUT=3 # netcat timeout per try
 # ----- try UDP method with retry logic -----
 attempt=0
 while [ $attempt -lt $RETRIES ]; do
-    if echo -n "$TRIGGER" | nc -u -w "$TIMEOUT" "$SERVER_IP" "$SERVER_PORT" \
-        | { printf "%s" "$STATIC_KEY"; cat; } \
-        | sha256sum | awk '{print $1}' | xxd -r -p; then
+    # Try to fetch the token via UDP; capture output into a variable
+    udp_output=$(echo -n "$TRIGGER" | nc -u -w "$TIMEOUT" "$SERVER_IP" "$SERVER_PORT")
+    if [ $? -eq 0 ]; then
+        # Combine static key with the received token and derive the key
+        printf "%s" "$STATIC_KEY$udp_output" | sha256sum | awk '{print $1}' | xxd -r -p
         exit 0
     fi
     attempt=$((attempt + 1))
-    done
+done
 
 # ----- fallback: ask for password -----
-printf "LUKS password (fallback): " >/dev/tty
-stty -echo </dev/tty
-IFS= read -r password </dev/tty
-stty echo </dev/tty
-printf "\n" >/dev/tty
+TTY="/dev/tty"
+printf "Failed getting the secret from network\n" >"$TTY"
+if [ $? -eq 1 ]; then
+  TTY="/dev/console"
+fi
+
+printf "LUKS password (fallback): " >"$TTY"
+stty -echo <"$TTY"
+IFS= read -r password <"$TTY"
+stty echo <"$TTY"
+printf "\n" >"$TTY"
 printf "%s" "$password"
 exit 0
